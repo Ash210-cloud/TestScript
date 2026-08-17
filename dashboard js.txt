@@ -1,0 +1,2860 @@
+/* ============================================================
+   SALES & INVENTORY AI
+   DASHBOARD
+   ============================================================ */
+
+
+/* ============================================================
+   DASHBOARD INITIALIZATION
+   ============================================================ */
+
+function initializeDashboard() {
+
+    console.log(
+        "Sales & Inventory AI dashboard initialized."
+    );
+
+    loadDashboardData();
+
+    setupAIQuery();
+
+    setupDatasetUpload();
+
+}
+
+
+/* ============================================================
+   DASHBOARD LOADING STATE
+   ============================================================ */
+
+function setDashboardLoading(isLoading) {
+
+    const values = [
+        "totalUnits",
+        "totalRecords",
+        "uniqueDevices",
+        "uniqueDealers"
+    ];
+
+
+    const insights = [
+        "topDevice",
+        "topDealer",
+        "topRegion",
+        "topState",
+        "bestMonth"
+    ];
+
+
+    const metrics = [
+        "topDeviceUnits",
+        "topDealerUnits",
+        "topRegionUnits",
+        "topStateUnits",
+        "bestMonthUnits"
+    ];
+
+
+    if (isLoading) {
+
+        values.forEach(function (id) {
+
+            const element =
+                document.getElementById(id);
+
+            if (!element) {
+                return;
+            }
+
+            element.classList.add(
+                "is-loading"
+            );
+
+            element.innerHTML =
+                '<span class="dashboard-loading"></span>';
+
+        });
+
+
+        insights.forEach(function (id) {
+
+            const element =
+                document.getElementById(id);
+
+            if (!element) {
+                return;
+            }
+
+            element.classList.add(
+                "is-loading"
+            );
+
+            element.innerHTML =
+                '<span class="insight-loading"></span>';
+
+        });
+
+
+        metrics.forEach(function (id) {
+
+            const element =
+                document.getElementById(id);
+
+            if (!element) {
+                return;
+            }
+
+            element.classList.add(
+                "is-loading"
+            );
+
+            element.innerHTML =
+                '<span class="dashboard-loading"></span>';
+
+        });
+
+    }
+    else {
+
+        values.forEach(function (id) {
+
+            const element =
+                document.getElementById(id);
+
+            if (!element) {
+                return;
+            }
+
+            element.classList.remove(
+                "is-loading"
+            );
+
+        });
+
+
+        insights.forEach(function (id) {
+
+            const element =
+                document.getElementById(id);
+
+            if (!element) {
+                return;
+            }
+
+            element.classList.remove(
+                "is-loading"
+            );
+
+        });
+
+
+        metrics.forEach(function (id) {
+
+            const element =
+                document.getElementById(id);
+
+            if (!element) {
+                return;
+            }
+
+            element.classList.remove(
+                "is-loading"
+            );
+
+        });
+
+    }
+
+}
+
+
+/* ============================================================
+   UPLOAD / ANALYSIS DASHBOARD STATE
+   ============================================================ */
+
+function setAnalysisState(isAnalyzing) {
+
+    const dashboardPage =
+        document.querySelector(
+            ".dashboard-page"
+        );
+
+
+    const uploadCard =
+        document.querySelector(
+            ".dataset-upload-card"
+        );
+
+
+    if (dashboardPage) {
+
+        if (isAnalyzing) {
+
+            dashboardPage.classList.add(
+                "dashboard-is-analyzing"
+            );
+
+        }
+        else {
+
+            dashboardPage.classList.remove(
+                "dashboard-is-analyzing"
+            );
+
+        }
+
+    }
+
+
+    if (uploadCard) {
+
+        if (isAnalyzing) {
+
+            uploadCard.classList.add(
+                "is-analyzing"
+            );
+
+        }
+        else {
+
+            uploadCard.classList.remove(
+                "is-analyzing"
+            );
+
+        }
+
+    }
+
+}
+
+
+/* ============================================================
+   LOAD DASHBOARD DATA
+   ============================================================ */
+
+async function loadDashboardData() {
+
+    setDashboardLoading(true);
+
+    setAnalysisState(true);
+
+
+    try {
+
+        console.log(
+            "Analyzing dashboard dataset..."
+        );
+
+
+        const response = await fetch(
+            "/api/query",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify({
+                    question:
+                        "Give me an overall sales summary."
+                })
+            }
+        );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                `API request failed with status ${response.status}`
+            );
+
+        }
+
+
+        const data =
+            await response.json();
+
+
+        console.log(
+            "Overall dashboard response:",
+            data
+        );
+
+
+        if (!data.success) {
+
+            console.error(
+                "Dashboard API error:",
+                data.error
+            );
+
+            return;
+
+        }
+
+
+        const result =
+            data.result || {};
+
+
+        /* ----------------------------------------------------
+           OVERALL SUMMARY
+           ---------------------------------------------------- */
+
+        const totalUnits =
+            document.getElementById(
+                "totalUnits"
+            );
+
+        if (totalUnits) {
+
+            totalUnits.textContent =
+                Number(
+                    result.total_units || 0
+                ).toLocaleString();
+
+        }
+
+
+        const totalRecords =
+            document.getElementById(
+                "totalRecords"
+            );
+
+        if (totalRecords) {
+
+            totalRecords.textContent =
+                Number(
+                    result.total_records || 0
+                ).toLocaleString();
+
+        }
+
+
+        const uniqueDevices =
+            document.getElementById(
+                "uniqueDevices"
+            );
+
+        if (uniqueDevices) {
+
+            uniqueDevices.textContent =
+                Number(
+                    result.unique_devices || 0
+                ).toLocaleString();
+
+        }
+
+
+        const uniqueDealers =
+            document.getElementById(
+                "uniqueDealers"
+            );
+
+        if (uniqueDealers) {
+
+            uniqueDealers.textContent =
+                Number(
+                    result.unique_dealers || 0
+                ).toLocaleString();
+
+        }
+
+
+        /* ----------------------------------------------------
+           LOAD INDIVIDUAL INSIGHTS
+           ---------------------------------------------------- */
+
+        await Promise.all([
+
+            loadInsight(
+                "What is the best selling device?"
+            ),
+
+            loadInsight(
+                "Who is the best dealer?"
+            ),
+
+            loadInsight(
+                "Which region has the highest sales?"
+            ),
+
+            loadInsight(
+                "Which state has the highest sales?"
+            ),
+
+            loadInsight(
+                "What was the best month?"
+            ),
+
+            loadSalesOverview()
+
+        ]);
+
+
+        console.log(
+            "Dashboard analysis completed."
+        );
+
+    }
+    catch (error) {
+
+        console.error(
+            "Failed to load dashboard:",
+            error
+        );
+
+    }
+    finally {
+
+        setDashboardLoading(false);
+
+        setAnalysisState(false);
+
+    }
+
+}
+
+
+/* ============================================================
+   SALES OVERVIEW CHART
+   ============================================================ */
+
+let salesOverviewChart = null;
+
+
+async function loadSalesOverview() {
+
+    const loading =
+        document.getElementById(
+            "salesChartLoading"
+        );
+
+    const canvasWrapper =
+        document.getElementById(
+            "salesChartCanvasWrapper"
+        );
+
+    const emptyState =
+        document.getElementById(
+            "salesChartEmpty"
+        );
+
+
+    if (
+        !loading ||
+        !canvasWrapper ||
+        !emptyState
+    ) {
+
+        console.error(
+            "Sales overview chart elements were not found."
+        );
+
+        return;
+
+    }
+
+
+    loading.style.display =
+        "flex";
+
+    canvasWrapper.style.display =
+        "none";
+
+    emptyState.style.display =
+        "none";
+
+
+    try {
+
+        console.log(
+            "Loading monthly sales overview..."
+        );
+
+
+        /*
+         * Use the existing backend dashboard
+         * sales-trend endpoint.
+         */
+
+        const response =
+            await fetch(
+                "/api/dashboard/sales-trend",
+                {
+                    method: "GET"
+                }
+            );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                `Sales overview API request failed with status ${response.status}`
+            );
+
+        }
+
+
+        const data =
+            await response.json();
+
+
+        console.log(
+            "Sales overview response:",
+            data
+        );
+
+
+        if (!data.success) {
+
+            throw new Error(
+                data.error ||
+                "Sales overview request failed."
+            );
+
+        }
+
+
+        /*
+         * Find the chart canvas that actually exists
+         * in dashboard.html.
+         */
+
+        const canvas =
+            document.getElementById(
+                "salesOverviewChart"
+            );
+
+
+        if (!canvas) {
+
+            throw new Error(
+                "Sales overview canvas #salesOverviewChart was not found."
+            );
+
+        }
+
+
+        /*
+         * Check Chart.js.
+         */
+
+        if (
+            typeof Chart === "undefined"
+        ) {
+
+            throw new Error(
+                "Chart.js is not loaded."
+            );
+
+        }
+
+
+        /*
+         * Accept the backend's existing
+         * labels / values structure.
+         */
+
+        let labels =
+            Array.isArray(data.labels)
+                ? data.labels
+                : [];
+
+        let values =
+            Array.isArray(data.values)
+                ? data.values
+                : [];
+
+
+        /*
+         * Fallback support in case the backend
+         * returns a result object.
+         */
+
+        if (
+            labels.length === 0 &&
+            values.length === 0 &&
+            data.result
+        ) {
+
+            const result =
+                data.result;
+
+
+            if (
+                Array.isArray(result.labels)
+            ) {
+
+                labels =
+                    result.labels;
+
+            }
+
+
+            if (
+                Array.isArray(result.values)
+            ) {
+
+                values =
+                    result.values;
+
+            }
+
+        }
+
+
+        /*
+         * Additional fallback support for
+         * monthly_sales / monthly structures.
+         */
+
+        if (
+            labels.length === 0 &&
+            values.length === 0
+        ) {
+
+            let monthlyData =
+                data.monthly_sales ||
+                data.monthly ||
+                data.monthly_performance ||
+                data.sales_by_month ||
+                data.data ||
+                [];
+
+
+            if (
+                data.result &&
+                typeof data.result === "object"
+            ) {
+
+                monthlyData =
+                    data.result.monthly_sales ||
+                    data.result.monthly ||
+                    data.result.monthly_performance ||
+                    data.result.sales_by_month ||
+                    data.result.data ||
+                    monthlyData;
+
+            }
+
+
+            if (
+                Array.isArray(monthlyData)
+            ) {
+
+                monthlyData.forEach(
+                    function (item, index) {
+
+                        if (
+                            typeof item === "number"
+                        ) {
+
+                            labels.push(
+                                `Month ${index + 1}`
+                            );
+
+                            values.push(
+                                Number(item)
+                            );
+
+                            return;
+
+                        }
+
+
+                        if (
+                            item &&
+                            typeof item === "object"
+                        ) {
+
+                            labels.push(
+                                item.month ||
+                                item.month_name ||
+                                item.label ||
+                                item.period ||
+                                item.date ||
+                                `Month ${index + 1}`
+                            );
+
+
+                            values.push(
+                                Number(
+                                    item.units ||
+                                    item.total_units ||
+                                    item.sales ||
+                                    item.sales_units ||
+                                    item.value ||
+                                    item.total ||
+                                    0
+                                )
+                            );
+
+                        }
+
+                    }
+                );
+
+            }
+
+        }
+
+
+        /*
+         * If there is no data, show the empty state.
+         */
+
+        if (
+            labels.length === 0 ||
+            values.length === 0
+        ) {
+
+            console.warn(
+                "No sales overview data returned by API.",
+                data
+            );
+
+
+            loading.style.display =
+                "none";
+
+            canvasWrapper.style.display =
+                "none";
+
+            emptyState.style.display =
+                "flex";
+
+            return;
+
+        }
+
+
+        /*
+         * Make sure the two arrays have
+         * matching lengths.
+         */
+
+        const chartLength =
+            Math.min(
+                labels.length,
+                values.length
+            );
+
+
+        labels =
+            labels.slice(
+                0,
+                chartLength
+            );
+
+
+        values =
+            values
+                .slice(
+                    0,
+                    chartLength
+                )
+                .map(
+                    function (value) {
+
+                        return Number(value) || 0;
+
+                    }
+                );
+
+
+        /*
+         * Destroy existing chart.
+         */
+
+        if (
+            salesOverviewChart
+        ) {
+
+            salesOverviewChart.destroy();
+
+            salesOverviewChart =
+                null;
+
+        }
+
+
+        /*
+         * Create chart.
+         */
+
+        salesOverviewChart =
+            new Chart(
+                canvas,
+                {
+                    type: "line",
+
+                    data: {
+
+                        labels:
+                            labels,
+
+                        datasets: [
+
+                            {
+                                label:
+                                    "Units Sold",
+
+                                data:
+                                    values,
+
+                                borderWidth:
+                                    3,
+
+                                tension:
+                                    0.35,
+
+                                fill:
+                                    true,
+
+                                pointRadius:
+                                    4,
+
+                                pointHoverRadius:
+                                    6
+
+                            }
+
+                        ]
+
+                    },
+
+
+                    options: {
+
+                        responsive:
+                            true,
+
+                        maintainAspectRatio:
+                            false,
+
+
+                        interaction: {
+
+                            mode:
+                                "index",
+
+                            intersect:
+                                false
+
+                        },
+
+
+                        plugins: {
+
+                            legend: {
+
+                                display:
+                                    false
+
+                            },
+
+
+                            tooltip: {
+
+                                callbacks: {
+
+                                    label:
+                                        function (
+                                            context
+                                        ) {
+
+                                            return (
+                                                " Units Sold: " +
+                                                Number(
+                                                    context.parsed.y || 0
+                                                ).toLocaleString()
+                                            );
+
+                                        }
+
+                                }
+
+                            }
+
+                        },
+
+
+                        scales: {
+
+                            x: {
+
+                                grid: {
+
+                                    display:
+                                        false
+
+                                },
+
+                                ticks: {
+
+                                    color:
+                                        "#6b7280",
+
+                                    font: {
+
+                                        size:
+                                            11
+
+                                    }
+
+                                }
+
+                            },
+
+
+                            y: {
+
+                                beginAtZero:
+                                    true,
+
+                                grid: {
+
+                                    color:
+                                        "#eef2f0"
+
+                                },
+
+                                ticks: {
+
+                                    color:
+                                        "#6b7280",
+
+                                    font: {
+
+                                        size:
+                                            11
+
+                                    },
+
+                                    callback:
+                                        function (
+                                            value
+                                        ) {
+
+                                            return Number(
+                                                value
+                                            ).toLocaleString();
+
+                                        }
+
+                                }
+
+                            }
+
+                        }
+
+                    }
+
+                }
+            );
+
+
+        loading.style.display =
+            "none";
+
+        canvasWrapper.style.display =
+            "block";
+
+        emptyState.style.display =
+            "none";
+
+
+        console.log(
+            "Sales overview chart loaded successfully."
+        );
+
+    }
+    catch (error) {
+
+        console.error(
+            "Failed to load sales overview:",
+            error
+        );
+
+
+        loading.style.display =
+            "none";
+
+        canvasWrapper.style.display =
+            "none";
+
+        emptyState.style.display =
+            "flex";
+
+    }
+
+}
+
+
+/* ============================================================
+   LOAD INDIVIDUAL INSIGHT
+   ============================================================ */
+
+async function loadInsight(question) {
+
+    try {
+
+        console.log(
+            "Analyzing insight:",
+            question
+        );
+
+
+        const response = await fetch(
+            "/api/query",
+            {
+                method: "POST",
+
+                headers: {
+                    "Content-Type": "application/json"
+                },
+
+                body: JSON.stringify({
+                    question: question
+                })
+            }
+        );
+
+
+        if (!response.ok) {
+
+            throw new Error(
+                `Insight API request failed with status ${response.status}`
+            );
+
+        }
+
+
+        const data =
+            await response.json();
+
+
+        console.log(
+            "Insight response:",
+            question,
+            data
+        );
+
+
+        if (!data.success) {
+
+            console.error(
+                "Insight API error:",
+                data.error
+            );
+
+            return;
+
+        }
+
+
+        const result =
+            data.result || {};
+
+
+        /* ----------------------------------------------------
+           TOP DEVICE
+           ---------------------------------------------------- */
+
+        if (
+            data.intent === "top_device"
+        ) {
+
+            const topDevice =
+                document.getElementById(
+                    "topDevice"
+                );
+
+            if (topDevice) {
+
+                topDevice.textContent =
+                    result.device_name || "—";
+
+            }
+
+
+            const topDeviceUnits =
+                document.getElementById(
+                    "topDeviceUnits"
+                );
+
+            if (topDeviceUnits) {
+
+                topDeviceUnits.textContent =
+                    Number(
+                        result.units || 0
+                    ).toLocaleString();
+
+            }
+
+        }
+
+
+        /* ----------------------------------------------------
+           TOP DEALER
+           ---------------------------------------------------- */
+
+        if (
+            data.intent === "top_dealer"
+        ) {
+
+            const topDealer =
+                document.getElementById(
+                    "topDealer"
+                );
+
+            if (topDealer) {
+
+                topDealer.textContent =
+                    result.dealer_name || "—";
+
+            }
+
+
+            const topDealerUnits =
+                document.getElementById(
+                    "topDealerUnits"
+                );
+
+            if (topDealerUnits) {
+
+                topDealerUnits.textContent =
+                    Number(
+                        result.units || 0
+                    ).toLocaleString();
+
+            }
+
+        }
+
+
+        /* ----------------------------------------------------
+           TOP REGION
+           ---------------------------------------------------- */
+
+        if (
+            data.intent === "top_region"
+        ) {
+
+            const topRegion =
+                document.getElementById(
+                    "topRegion"
+                );
+
+            if (topRegion) {
+
+                topRegion.textContent =
+                    result.region || "—";
+
+            }
+
+
+            const topRegionUnits =
+                document.getElementById(
+                    "topRegionUnits"
+                );
+
+            if (topRegionUnits) {
+
+                topRegionUnits.textContent =
+                    Number(
+                        result.units || 0
+                    ).toLocaleString();
+
+            }
+
+        }
+
+
+        /* ----------------------------------------------------
+           TOP STATE
+           ---------------------------------------------------- */
+
+        if (
+            data.intent === "top_state"
+        ) {
+
+            const topState =
+                document.getElementById(
+                    "topState"
+                );
+
+            if (topState) {
+
+                topState.textContent =
+                    result.state || "—";
+
+            }
+
+
+            const topStateUnits =
+                document.getElementById(
+                    "topStateUnits"
+                );
+
+            if (topStateUnits) {
+
+                topStateUnits.textContent =
+                    Number(
+                        result.units || 0
+                    ).toLocaleString();
+
+            }
+
+        }
+
+
+        /* ----------------------------------------------------
+           BEST MONTH
+           ---------------------------------------------------- */
+
+        if (
+            data.intent === "best_month"
+        ) {
+
+            const bestMonth =
+                document.getElementById(
+                    "bestMonth"
+                );
+
+            if (bestMonth) {
+
+                bestMonth.textContent =
+                    `${result.month || "—"} ${result.year || ""}`;
+
+            }
+
+
+            const bestMonthUnits =
+                document.getElementById(
+                    "bestMonthUnits"
+                );
+
+            if (bestMonthUnits) {
+
+                bestMonthUnits.textContent =
+                    Number(
+                        result.units || 0
+                    ).toLocaleString();
+
+            }
+
+        }
+
+    }
+    catch (error) {
+
+        console.error(
+            "Failed to load insight:",
+            question,
+            error
+        );
+
+    }
+
+}
+
+
+/* ============================================================
+   DATASET UPLOAD
+   ============================================================ */
+
+function setupDatasetUpload() {
+
+    const dropZone =
+        document.getElementById(
+            "datasetDropZone"
+        );
+
+    const fileInput =
+        document.getElementById(
+            "datasetFileInput"
+        );
+
+    let uploadStatus =
+        document.getElementById(
+            "datasetUploadStatus"
+        );
+
+
+    if (
+        !dropZone ||
+        !fileInput
+    ) {
+
+        console.error(
+            "Dataset upload elements were not found."
+        );
+
+        return;
+
+    }
+
+
+    /* --------------------------------------------------------
+       CREATE STATUS AREA IF MISSING
+       -------------------------------------------------------- */
+
+    if (!uploadStatus) {
+
+        uploadStatus =
+            document.createElement(
+                "div"
+            );
+
+        uploadStatus.id =
+            "datasetUploadStatus";
+
+        uploadStatus.className =
+            "dataset-upload-status";
+
+
+        dropZone.insertAdjacentElement(
+            "afterend",
+            uploadStatus
+        );
+
+    }
+
+
+    /* --------------------------------------------------------
+       PREVENT DOUBLE INITIALIZATION
+       -------------------------------------------------------- */
+
+    if (
+        dropZone.dataset.uploadInitialized ===
+        "true"
+    ) {
+
+        return;
+
+    }
+
+
+    dropZone.dataset.uploadInitialized =
+        "true";
+
+
+    /* --------------------------------------------------------
+       OPEN FILE SELECTOR
+       -------------------------------------------------------- */
+
+    dropZone.addEventListener(
+        "click",
+        function (event) {
+
+            if (
+                event.target === fileInput
+            ) {
+
+                return;
+
+            }
+
+
+            fileInput.click();
+
+        }
+    );
+
+
+    /* --------------------------------------------------------
+       FILE SELECTED
+       -------------------------------------------------------- */
+
+    fileInput.addEventListener(
+        "change",
+        function () {
+
+            if (
+                fileInput.files &&
+                fileInput.files.length > 0
+            ) {
+
+                uploadDataset(
+                    fileInput.files[0]
+                );
+
+            }
+
+        }
+    );
+
+
+    /* --------------------------------------------------------
+       DRAG OVER
+       -------------------------------------------------------- */
+
+    dropZone.addEventListener(
+        "dragover",
+        function (event) {
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+
+            if (
+                event.dataTransfer
+            ) {
+
+                event.dataTransfer.dropEffect =
+                    "copy";
+
+            }
+
+
+            dropZone.classList.add(
+                "drag-over"
+            );
+
+        }
+    );
+
+
+    /* --------------------------------------------------------
+       DRAG ENTER
+       -------------------------------------------------------- */
+
+    dropZone.addEventListener(
+        "dragenter",
+        function (event) {
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+            dropZone.classList.add(
+                "drag-over"
+            );
+
+        }
+    );
+
+
+    /* --------------------------------------------------------
+       DRAG LEAVE
+       -------------------------------------------------------- */
+
+    dropZone.addEventListener(
+        "dragleave",
+        function (event) {
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+
+            if (
+                !dropZone.contains(
+                    event.relatedTarget
+                )
+            ) {
+
+                dropZone.classList.remove(
+                    "drag-over"
+                );
+
+            }
+
+        }
+    );
+
+
+    /* --------------------------------------------------------
+       DROP FILE
+       -------------------------------------------------------- */
+
+    dropZone.addEventListener(
+        "drop",
+        function (event) {
+
+            event.preventDefault();
+
+            event.stopPropagation();
+
+
+            dropZone.classList.remove(
+                "drag-over"
+            );
+
+
+            if (
+                !event.dataTransfer ||
+                !event.dataTransfer.files
+            ) {
+
+                return;
+
+            }
+
+
+            const files =
+                event.dataTransfer.files;
+
+
+            if (
+                files.length > 0
+            ) {
+
+                uploadDataset(
+                    files[0]
+                );
+
+            }
+
+        }
+    );
+
+
+    /* --------------------------------------------------------
+       UPLOAD DATASET
+       -------------------------------------------------------- */
+
+    async function uploadDataset(file) {
+
+        if (!file) {
+
+            return;
+
+        }
+
+
+        const filename =
+            file.name.toLowerCase();
+
+
+        /* ----------------------------------------------------
+           CHECK FILE TYPE
+           ---------------------------------------------------- */
+
+        if (
+            !filename.endsWith(".xlsx") &&
+            !filename.endsWith(".xls")
+        ) {
+
+            uploadStatus.className =
+                "dataset-upload-status error";
+
+
+            uploadStatus.innerHTML = `
+                <span class="dataset-status-icon">
+                    ⚠️
+                </span>
+
+                <span>
+                    <strong>Invalid file type.</strong><br>
+                    Please upload an Excel file.
+                </span>
+            `;
+
+
+            uploadStatus.style.display =
+                "flex";
+
+
+            return;
+
+        }
+
+
+        /* ----------------------------------------------------
+           PREVENT MULTIPLE UPLOADS
+           ---------------------------------------------------- */
+
+        dropZone.classList.add(
+            "uploading"
+        );
+
+        dropZone.classList.remove(
+            "drag-over"
+        );
+
+
+        /* ----------------------------------------------------
+           START DASHBOARD ANALYSIS STATE
+           ---------------------------------------------------- */
+
+        setDashboardLoading(true);
+
+        setAnalysisState(true);
+
+
+        /* ----------------------------------------------------
+           SHOW UPLOADING STATE
+           ---------------------------------------------------- */
+
+        uploadStatus.className =
+            "dataset-upload-status analyzing";
+
+
+        uploadStatus.innerHTML = `
+            <span class="dataset-loading-spinner"></span>
+
+            <span>
+                <strong>Uploading dataset...</strong><br>
+                Preparing <strong>${escapeHTML(file.name)}</strong>
+                for analysis.
+            </span>
+        `;
+
+
+        uploadStatus.style.display =
+            "flex";
+
+
+        /* ----------------------------------------------------
+           CREATE FORM DATA
+           ---------------------------------------------------- */
+
+        const formData =
+            new FormData();
+
+
+        formData.append(
+            "file",
+            file
+        );
+
+
+        try {
+
+            /* ------------------------------------------------
+               UPLOAD TO BACKEND
+               ------------------------------------------------ */
+
+            const response =
+                await fetch(
+                    "/api/upload",
+                    {
+                        method: "POST",
+                        body: formData
+                    }
+                );
+
+
+            let data;
+
+
+            try {
+
+                data =
+                    await response.json();
+
+            }
+            catch (jsonError) {
+
+                throw new Error(
+                    "The server returned an invalid response."
+                );
+
+            }
+
+
+            /* ------------------------------------------------
+               CHECK RESPONSE
+               ------------------------------------------------ */
+
+            if (
+                !response.ok ||
+                !data.success
+            ) {
+
+                let errorMessage =
+                    data.error ||
+                    "Failed to upload dataset.";
+
+
+                if (
+                    data.missing_columns &&
+                    data.missing_columns.length > 0
+                ) {
+
+                    errorMessage +=
+                        " Missing columns: " +
+                        data.missing_columns.join(
+                            ", "
+                        );
+
+                }
+
+
+                throw new Error(
+                    errorMessage
+                );
+
+            }
+
+
+            /* ------------------------------------------------
+               SHOW ANALYZING STATE
+               ------------------------------------------------ */
+
+            uploadStatus.className =
+                "dataset-upload-status analyzing";
+
+
+            uploadStatus.innerHTML = `
+                <span class="dataset-loading-spinner"></span>
+
+                <span>
+                    <strong>Analyzing dataset...</strong><br>
+                    Processing
+                    <strong>${Number(data.rows).toLocaleString()}</strong>
+                    rows and generating dashboard insights.
+                </span>
+            `;
+
+
+            uploadStatus.style.display =
+                "flex";
+
+
+            /*
+             * Give the browser enough time to render
+             * the analyzing state.
+             */
+
+            await delay(700);
+
+
+            /* ------------------------------------------------
+               RELOAD DASHBOARD
+               ------------------------------------------------ */
+
+            await loadDashboardData();
+
+
+            /* ------------------------------------------------
+               ANALYSIS COMPLETE
+               ------------------------------------------------ */
+
+            uploadStatus.className =
+                "dataset-upload-status success";
+
+
+            uploadStatus.innerHTML = `
+                <span class="dataset-status-icon">
+                    ✓
+                </span>
+
+                <span>
+                    <strong>Dataset analyzed successfully.</strong><br>
+                    ${escapeHTML(data.filename)}
+                    · ${Number(data.rows).toLocaleString()}
+                    rows processed.
+                </span>
+            `;
+
+
+            uploadStatus.style.display =
+                "flex";
+
+
+            /*
+             * Update drop zone.
+             */
+
+            dropZone.classList.add(
+                "upload-complete"
+            );
+
+
+            console.log(
+                "Dataset uploaded and analyzed successfully:",
+                data
+            );
+
+        }
+        catch (error) {
+
+            console.error(
+                "Dataset upload failed:",
+                error
+            );
+
+
+            uploadStatus.className =
+                "dataset-upload-status error";
+
+
+            uploadStatus.innerHTML = `
+                <span class="dataset-status-icon">
+                    ⚠️
+                </span>
+
+                <span>
+                    <strong>Dataset analysis failed.</strong><br>
+                    ${escapeHTML(
+                        error.message ||
+                        "Failed to process dataset."
+                    )}
+                </span>
+            `;
+
+
+            uploadStatus.style.display =
+                "flex";
+
+
+            /*
+             * Restore dashboard state after failure.
+             */
+
+            setDashboardLoading(false);
+
+            setAnalysisState(false);
+
+        }
+        finally {
+
+            dropZone.classList.remove(
+                "uploading"
+            );
+
+
+            /*
+             * Reset the file input so the same
+             * Excel file can be selected again.
+             */
+
+            fileInput.value = "";
+
+        }
+
+    }
+
+}
+
+
+/* ============================================================
+   SMALL DELAY
+   ============================================================ */
+
+function delay(milliseconds) {
+
+    return new Promise(
+        function (resolve) {
+
+            setTimeout(
+                resolve,
+                milliseconds
+            );
+
+        }
+    );
+
+}
+
+
+/* ============================================================
+   HTML ESCAPE
+   ============================================================ */
+
+function escapeHTML(value) {
+
+    return String(value)
+        .replace(
+            /&/g,
+            "&amp;"
+        )
+        .replace(
+            /</g,
+            "&lt;"
+        )
+        .replace(
+            />/g,
+            "&gt;"
+        )
+        .replace(
+            /"/g,
+            "&quot;"
+        )
+        .replace(
+            /'/g,
+            "&#039;"
+        );
+
+}
+
+
+/* ============================================================
+   PREDEFINED AI QUESTIONS
+   ============================================================ */
+
+const predefinedAIQuestions = [
+
+    {
+        category: "Sales Overview",
+
+        questions: [
+            {
+                text:
+                    "What is the overall sales summary?"
+            },
+
+            {
+                text:
+                    "What is the overall sales performance?"
+            },
+
+            {
+                text:
+                    "Give me an overall sales overview."
+            }
+        ]
+    },
+
+
+    {
+        category: "Devices",
+
+        questions: [
+            {
+                text:
+                    "What is the best selling device?"
+            },
+
+            {
+                text:
+                    "What are the top 5 devices?"
+            },
+
+            {
+                text:
+                    "What are the top 10 devices?"
+            },
+
+            {
+                text:
+                    "Which device has the highest sales?"
+            }
+        ]
+    },
+
+
+    {
+        category: "Dealers",
+
+        questions: [
+            {
+                text:
+                    "Who is the best dealer?"
+            },
+
+            {
+                text:
+                    "What are the top 5 dealers?"
+            },
+
+            {
+                text:
+                    "What are the top 10 dealers?"
+            },
+
+            {
+                text:
+                    "Which dealer has the highest sales performance?"
+            }
+        ]
+    },
+
+
+    {
+        category: "Geography",
+
+        questions: [
+            {
+                text:
+                    "Which region has the highest sales?"
+            },
+
+            {
+                text:
+                    "Which state has the highest sales?"
+            },
+
+            {
+                text:
+                    "What is the top performing region?"
+            },
+
+            {
+                text:
+                    "What is the top performing state?"
+            }
+        ]
+    },
+
+
+    {
+        category: "Monthly Performance",
+
+        questions: [
+            {
+                text:
+                    "What was the best month?"
+            },
+
+            {
+                text:
+                    "What was the worst month?"
+            },
+
+            {
+                text:
+                    "What is the latest month's sales performance?"
+            },
+
+            {
+                text:
+                    "What is the latest month's change?"
+            },
+
+            {
+                text:
+                    "What was the biggest monthly decline?"
+            }
+        ]
+    },
+
+
+    {
+        category: "Recontract",
+
+        questions: [
+            {
+                text:
+                    "What is the recontract sales performance?"
+            },
+
+            {
+                text:
+                    "What percentage of sales are recontract?"
+            },
+
+            {
+                text:
+                    "What are the new device GA sales?"
+            }
+        ]
+    },
+
+
+    {
+        category: "Sales Structure",
+
+        questions: [
+            {
+                text:
+                    "Which sales channel has the highest sales?"
+            },
+
+            {
+                text:
+                    "Which Rateplan has the highest sales?"
+            },
+
+            {
+                text:
+                    "Which Baseplan has the highest sales?"
+            },
+
+            {
+                text:
+                    "Which customer subtype has the highest sales?"
+            }
+        ]
+    },
+
+
+    {
+        category: "Dealer Information",
+
+        questions: [
+            {
+                text:
+                    "What is the dealer code?"
+            }
+        ]
+    }
+
+];
+
+
+/* ============================================================
+   AI QUERY
+   ============================================================ */
+
+function setupAIQuery() {
+
+    const questionDisplay =
+        document.getElementById(
+            "dashboardQuestion"
+        );
+
+    const questionButton =
+        document.getElementById(
+            "dashboardQuestionButton"
+        );
+
+    const resetButton =
+        document.getElementById(
+            "dashboardQuestionReset"
+        );
+
+    const responseBox =
+        document.getElementById(
+            "dashboardResponse"
+        );
+
+    const responseText =
+        document.getElementById(
+            "dashboardResponseText"
+        );
+
+    const modal =
+        document.getElementById(
+            "aiQuestionModal"
+        );
+
+    const modalClose =
+        document.getElementById(
+            "aiQuestionModalClose"
+        );
+
+    const modalCancel =
+        document.getElementById(
+            "aiQuestionCancel"
+        );
+
+    const searchInput =
+        document.getElementById(
+            "aiQuestionSearch"
+        );
+
+    const questionList =
+        document.getElementById(
+            "aiQuestionList"
+        );
+
+    const emptyState =
+        document.getElementById(
+            "aiQuestionEmpty"
+        );
+
+    const questionCount =
+        document.getElementById(
+            "aiQuestionCount"
+        );
+
+
+    if (
+        !questionDisplay ||
+        !questionButton ||
+        !resetButton ||
+        !responseBox ||
+        !responseText ||
+        !modal ||
+        !modalClose ||
+        !modalCancel ||
+        !searchInput ||
+        !questionList ||
+        !emptyState ||
+        !questionCount
+    ) {
+
+        console.error(
+            "AI query elements were not found."
+        );
+
+        return;
+
+    }
+
+
+    /*
+     * Prevent double initialization.
+     */
+
+    if (
+        questionButton.dataset.aiInitialized ===
+        "true"
+    ) {
+
+        return;
+
+    }
+
+
+    questionButton.dataset.aiInitialized =
+        "true";
+
+
+    let selectedQuestion = "";
+
+
+    /* ========================================================
+       GET ALL QUESTIONS
+       ======================================================== */
+
+    function getAllQuestions() {
+
+        const questions = [];
+
+
+        predefinedAIQuestions.forEach(
+            function (category) {
+
+                category.questions.forEach(
+                    function (question) {
+
+                        questions.push({
+
+                            category:
+                                category.category,
+
+                            text:
+                                question.text
+
+                        });
+
+                    }
+                );
+
+            }
+        );
+
+
+        return questions;
+
+    }
+
+
+    /* ========================================================
+       RENDER QUESTIONS
+       ======================================================== */
+
+    function renderQuestions(searchTerm = "") {
+
+        questionList.innerHTML = "";
+
+
+        const normalizedSearch =
+            searchTerm
+                .trim()
+                .toLowerCase();
+
+
+        let visibleQuestionCount =
+            0;
+
+
+        predefinedAIQuestions.forEach(
+            function (category) {
+
+                const matchingQuestions =
+                    category.questions.filter(
+                        function (question) {
+
+                            if (
+                                !normalizedSearch
+                            ) {
+
+                                return true;
+
+                            }
+
+
+                            return question.text
+                                .toLowerCase()
+                                .includes(
+                                    normalizedSearch
+                                );
+
+                        }
+                    );
+
+
+                if (
+                    matchingQuestions.length === 0
+                ) {
+
+                    return;
+
+                }
+
+
+                visibleQuestionCount +=
+                    matchingQuestions.length;
+
+
+                const categoryContainer =
+                    document.createElement(
+                        "div"
+                    );
+
+
+                categoryContainer.className =
+                    "ai-question-category";
+
+
+                const categoryTitle =
+                    document.createElement(
+                        "div"
+                    );
+
+
+                categoryTitle.className =
+                    "ai-question-category-title";
+
+
+                categoryTitle.textContent =
+                    category.category;
+
+
+                categoryContainer.appendChild(
+                    categoryTitle
+                );
+
+
+                matchingQuestions.forEach(
+                    function (question) {
+
+                        const questionItem =
+                            document.createElement(
+                                "button"
+                            );
+
+
+                        questionItem.type =
+                            "button";
+
+
+                        questionItem.className =
+                            "ai-question-item";
+
+
+                        const questionText =
+                            document.createElement(
+                                "span"
+                            );
+
+
+                        questionText.className =
+                            "ai-question-item-text";
+
+
+                        questionText.textContent =
+                            question.text;
+
+
+                        const arrow =
+                            document.createElement(
+                                "span"
+                            );
+
+
+                        arrow.className =
+                            "ai-question-item-arrow";
+
+
+                        arrow.textContent =
+                            "→";
+
+
+                        questionItem.appendChild(
+                            questionText
+                        );
+
+
+                        questionItem.appendChild(
+                            arrow
+                        );
+
+
+                        questionItem.addEventListener(
+                            "click",
+                            function () {
+
+                                selectQuestion(
+                                    question.text
+                                );
+
+                            }
+                        );
+
+
+                        categoryContainer.appendChild(
+                            questionItem
+                        );
+
+                    }
+                );
+
+
+                questionList.appendChild(
+                    categoryContainer
+                );
+
+            }
+        );
+
+
+        if (
+            visibleQuestionCount === 0
+        ) {
+
+            questionList.style.display =
+                "none";
+
+
+            emptyState.style.display =
+                "block";
+
+        }
+        else {
+
+            questionList.style.display =
+                "block";
+
+
+            emptyState.style.display =
+                "none";
+
+        }
+
+
+        questionCount.textContent =
+            `${visibleQuestionCount} ${
+                visibleQuestionCount === 1
+                    ? "question"
+                    : "questions"
+            }`;
+
+    }
+
+
+    /* ========================================================
+       SELECT QUESTION
+       ======================================================== */
+
+    function selectQuestion(question) {
+
+        selectedQuestion =
+            question;
+
+
+        questionDisplay.textContent =
+            question;
+
+
+        questionDisplay.classList.add(
+            "has-question"
+        );
+
+
+        closeQuestionModal();
+
+
+        responseBox.style.display =
+            "none";
+
+    }
+
+
+    /* ========================================================
+       RESET AI SECTION
+       ======================================================== */
+
+    function resetAIQuery() {
+
+        selectedQuestion =
+            "";
+
+
+        questionDisplay.textContent =
+            "Select a question to begin...";
+
+
+        questionDisplay.classList.remove(
+            "has-question"
+        );
+
+
+        responseText.textContent =
+            "";
+
+
+        responseBox.style.display =
+            "none";
+
+
+        questionButton.disabled =
+            false;
+
+
+        questionButton.textContent =
+            "Ask AI";
+
+
+        console.log(
+            "AI query section reset."
+        );
+
+    }
+
+
+    /* ========================================================
+       OPEN MODAL
+       ======================================================== */
+
+    function openQuestionModal() {
+
+        renderQuestions();
+
+
+        searchInput.value =
+            "";
+
+
+        modal.classList.add(
+            "active"
+        );
+
+
+        modal.setAttribute(
+            "aria-hidden",
+            "false"
+        );
+
+
+        document.body.classList.add(
+            "ai-question-modal-open"
+        );
+
+
+        setTimeout(
+            function () {
+
+                searchInput.focus();
+
+            },
+            50
+        );
+
+    }
+
+
+    /* ========================================================
+       CLOSE MODAL
+       ======================================================== */
+
+    function closeQuestionModal() {
+
+        modal.classList.remove(
+            "active"
+        );
+
+
+        modal.setAttribute(
+            "aria-hidden",
+            "true"
+        );
+
+
+        document.body.classList.remove(
+            "ai-question-modal-open"
+        );
+
+    }
+
+
+    /* ========================================================
+       ASK AI
+       ======================================================== */
+
+    async function askAI() {
+
+        if (
+            !selectedQuestion
+        ) {
+
+            openQuestionModal();
+
+            return;
+
+        }
+
+
+        questionButton.disabled =
+            true;
+
+
+        questionButton.textContent =
+            "Thinking...";
+
+
+        responseBox.style.display =
+            "none";
+
+
+        try {
+
+            const response =
+                await fetch(
+                    "/api/query",
+                    {
+                        method: "POST",
+
+                        headers: {
+
+                            "Content-Type":
+                                "application/json"
+
+                        },
+
+                        body:
+                            JSON.stringify({
+
+                                question:
+                                    selectedQuestion
+
+                            })
+
+                    }
+                );
+
+
+            if (
+                !response.ok
+            ) {
+
+                throw new Error(
+                    `AI API request failed with status ${response.status}`
+                );
+
+            }
+
+
+            const data =
+                await response.json();
+
+
+            if (
+                !data.success
+            ) {
+
+                responseText.textContent =
+                    data.error ||
+                    "Unable to process your question.";
+
+            }
+            else {
+
+                responseText.textContent =
+                    data.response ||
+                    "No response returned.";
+
+            }
+
+
+            responseBox.style.display =
+                "block";
+
+        }
+        catch (error) {
+
+            console.error(
+                "AI query failed:",
+                error
+            );
+
+
+            responseText.textContent =
+                "Unable to connect to the AI service.";
+
+
+            responseBox.style.display =
+                "block";
+
+        }
+        finally {
+
+            questionButton.disabled =
+                false;
+
+
+            questionButton.textContent =
+                "Ask AI";
+
+        }
+
+    }
+
+
+    /* ========================================================
+       OPEN QUESTION SELECTOR
+       ======================================================== */
+
+    questionDisplay.addEventListener(
+        "click",
+        function () {
+
+            openQuestionModal();
+
+        }
+    );
+
+
+    questionButton.addEventListener(
+        "click",
+        function () {
+
+            if (
+                !selectedQuestion
+            ) {
+
+                openQuestionModal();
+
+                return;
+
+            }
+
+
+            askAI();
+
+        }
+    );
+
+
+    /* ========================================================
+       RESET BUTTON
+       ======================================================== */
+
+    resetButton.addEventListener(
+        "click",
+        function () {
+
+            resetAIQuery();
+
+        }
+    );
+
+
+    /* ========================================================
+       CLOSE BUTTON
+       ======================================================== */
+
+    modalClose.addEventListener(
+        "click",
+        closeQuestionModal
+    );
+
+
+    modalCancel.addEventListener(
+        "click",
+        closeQuestionModal
+    );
+
+
+    /* ========================================================
+       SEARCH
+       ======================================================== */
+
+    searchInput.addEventListener(
+        "input",
+        function () {
+
+            renderQuestions(
+                searchInput.value
+            );
+
+        }
+    );
+
+
+    /* ========================================================
+       CLOSE WHEN CLICKING OUTSIDE MODAL
+       ======================================================== */
+
+    modal.addEventListener(
+        "click",
+        function (event) {
+
+            if (
+                event.target === modal
+            ) {
+
+                closeQuestionModal();
+
+            }
+
+        }
+    );
+
+
+    /* ========================================================
+       ESCAPE KEY
+       ======================================================== */
+
+    document.addEventListener(
+        "keydown",
+        function (event) {
+
+            if (
+                event.key === "Escape" &&
+                modal.classList.contains(
+                    "active"
+                )
+            ) {
+
+                closeQuestionModal();
+
+            }
+
+        }
+    );
+
+
+    /* ========================================================
+       INITIAL QUESTION LIST
+       ======================================================== */
+
+    renderQuestions();
+
+}
+
+
+/* ============================================================
+   START DASHBOARD
+   ============================================================ */
+
+document.addEventListener(
+    "DOMContentLoaded",
+    function () {
+
+        const dashboardPage =
+            document.querySelector(
+                ".dashboard-page"
+            );
+
+
+        if (!dashboardPage) {
+
+            return;
+
+        }
+
+
+        initializeDashboard();
+
+    }
+);
