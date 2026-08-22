@@ -2,6 +2,10 @@ from pathlib import Path
 import sys
 import traceback
 import re
+import json
+import os
+import urllib.request
+import urllib.error
 
 import pandas as pd
 from flask import Flask, jsonify, request, render_template
@@ -27,7 +31,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from data_engine.query_engine import query
 from data_engine.response_engine import generate_response
 from data_engine.spd_analysis import get_spd_complete_analysis
-from backend.services.ai_service import DexterServiceError, ask_dexter
 
 
 # ============================================================
@@ -1171,6 +1174,100 @@ def query_api():
 
 
 # ============================================================
+# COPILOT WORKFLOW HTTP ENDPOINT
+# ============================================================
+
+def _get_copilot_workflow_endpoint():
+    endpoint = os.getenv("MARCH_COPILOT_WORKFLOW_URL", "").strip()
+    if not endpoint:
+        raise RuntimeError(
+            "Copilot Workflow endpoint is not configured. "
+            "Add MARCH_COPILOT_WORKFLOW_URL to your .env file."
+        )
+    return endpoint
+
+
+def _build_verified_context(question, query_result, dataset_name="Sales_Inventory"):
+    result_json = json.dumps(
+        query_result.get("result", {}),
+        ensure_ascii=False,
+        indent=2,
+        default=str,
+    )
+    intent = query_result.get("intent", "unknown")
+    return f"""
+USER QUESTION:
+{question}
+
+VERIFIED PYTHON ANALYSIS OUTPUT:
+Dataset: {dataset_name}
+Analysis intent: {intent}
+Calculated by: Local Python analytics engine
+
+RESULT:
+{result_json}
+
+RESPONSE REQUIREMENTS:
+- Use the verified Python output above as the only source of truth for all figures, rankings, percentages, dates, names and metrics.
+- Do not calculate, estimate, guess, invent, change or contradict data.
+- Do not mix SPD_DATA with Sales/Inventory data.
+- Answer in concise, professional British English.
+- Start with the direct answer or key business finding.
+- Preserve the metric supplied by Python, such as units, records, customers, activations, or sales.
+- You may provide practical recommendations, but clearly separate them from verified findings and use cautious language such as:
+  "This may indicate..." or "It may be useful to review...".
+- If the verified result is empty, unsupported, or unknown, state that the available Python analysis does not support an accurate answer.
+""".strip()
+
+
+def _call_copilot_workflow(question, query_result):
+    endpoint = _get_copilot_workflow_endpoint()
+    payload = {
+        "question": question,
+        "verified_context": _build_verified_context(
+            question,
+            query_result,
+            "Sales_Inventory",
+        ),
+    }
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        endpoint,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as response:
+            response_body = response.read().decode("utf-8")
+            if not response_body.strip():
+                raise RuntimeError("Copilot Workflow returned an empty response.")
+            return response_body.strip()
+    except urllib.error.HTTPError as error:
+        try:
+            error_body = error.read().decode("utf-8", errors="replace")
+        except Exception:
+            error_body = ""
+        print(f"Copilot Workflow HTTP error: {error.code}")
+        if error_body:
+            print("Copilot Workflow response:")
+            print(error_body)
+        raise RuntimeError(
+            f"Copilot Workflow returned HTTP {error.code}: "
+            f"{error_body or error.reason}"
+        ) from error
+    except urllib.error.URLError as error:
+        raise RuntimeError(
+            f"Could not connect to the Copilot Workflow endpoint: {error.reason}"
+        ) from error
+    except Exception as error:
+        raise RuntimeError(f"Copilot Workflow request failed: {error}") from error
+
+
+# ============================================================
 # DEXTER AI CHAT API
 # ============================================================
 
@@ -1350,65 +1447,33 @@ def dexter_chat():
         }), 500
 
     # --------------------------------------------------------
-    # SEND VERIFIED RESULT TO DEXTER
+    # SEND VERIFIED RESULT TO COPILOT WORKFLOW
     # --------------------------------------------------------
 
     try:
 
         print(
-            "\nSending verified result to Dexter..."
+            "\nSending verified result to Copilot Workflow..."
         )
 
-        dexter_result = ask_dexter(
+        answer = _call_copilot_workflow(
             question=question,
             query_result=query_result,
-            dataset_name="Sales_Inventory",
-            conversation_id=conversation_id,
         )
 
         print(
-            "Dexter response received."
+            "Copilot Workflow response received."
         )
 
         print("=" * 60 + "\n")
-
-        # ----------------------------------------------------
-        # RETURN DEXTER RESPONSE
-        # ----------------------------------------------------
 
         return jsonify({
             "success": True,
             "question": question,
-            "answer": dexter_result.get(
-                "answer",
-                ""
-            ),
-            "conversation_id":
-                dexter_result.get(
-                    "conversation_id"
-                ),
-            "intent":
-                query_result.get(
-                    "intent"
-                ),
+            "answer": answer,
+            "conversation_id": conversation_id,
+            "intent": query_result.get("intent"),
         })
-
-    except DexterServiceError as error:
-
-        print("\n" + "=" * 60)
-        print("DEXTER SERVICE ERROR")
-        print("=" * 60)
-
-        print(
-            str(error)
-        )
-
-        print("=" * 60 + "\n")
-
-        return jsonify({
-            "success": False,
-            "error": str(error),
-        }), 502
 
     except Exception as error:
 
@@ -1427,6 +1492,7 @@ def dexter_chat():
                 f"{str(error)}"
             ),
         }), 502
+
 
 
 # ============================================================
