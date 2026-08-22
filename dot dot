@@ -1,1 +1,1459 @@
+from pathlib import Path
+import sys
+import traceback
+import re
 
+import pandas as pd
+from flask import Flask, jsonify, request, render_template
+
+
+# ============================================================
+# PROJECT ROOT
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(
+        0,
+        str(PROJECT_ROOT)
+    )
+
+
+# ============================================================
+# DATA ENGINE IMPORTS
+# ============================================================
+
+from data_engine.query_engine import query
+from data_engine.response_engine import generate_response
+from data_engine.spd_analysis import get_spd_complete_analysis
+from backend.services.ai_service import DexterServiceError, ask_dexter
+
+
+# ============================================================
+# ROUTE BLUEPRINT IMPORTS
+# ============================================================
+
+# Existing SPD DATA DEVICE DASHBOARD
+from backend.routes.dashboard_routes import dashboard_bp
+
+# New SPD DATA DASHBOARD
+from backend.routes.dashboard_2_routes import dashboard_2_bp
+
+
+# ============================================================
+# FLASK APPLICATION
+# ============================================================
+
+app = Flask(
+    __name__,
+    template_folder=str(
+        PROJECT_ROOT / "frontend" / "templates"
+    ),
+    static_folder=str(
+        PROJECT_ROOT / "frontend" / "static"
+    ),
+)
+
+
+# ============================================================
+# REGISTER BLUEPRINTS
+# ============================================================
+
+# ------------------------------------------------------------
+# EXISTING DASHBOARD
+# ------------------------------------------------------------
+
+app.register_blueprint(
+    dashboard_bp
+)
+
+
+# ------------------------------------------------------------
+# SECOND SPD DASHBOARD
+# ------------------------------------------------------------
+
+app.register_blueprint(
+    dashboard_2_bp
+)
+
+
+# ============================================================
+# DATASET
+# ============================================================
+
+FILE_PATH = (
+    PROJECT_ROOT
+    / "data"
+    / "input"
+    / "sales_inventory.xlsx"
+)
+
+
+# ============================================================
+# LOAD DATASET
+# ============================================================
+
+print("=" * 60)
+print("SALES & INVENTORY AI")
+print("=" * 60)
+
+print("\nLoading dataset...")
+
+try:
+
+    df = pd.read_excel(FILE_PATH)
+
+    # Normalize column names
+    df.columns = (
+        df.columns
+        .astype(str)
+        .str.strip()
+    )
+
+    print(
+        f"Loaded {len(df):,} rows."
+    )
+
+    print("\nDATASET COLUMNS:")
+    print(df.columns.tolist())
+
+except Exception as error:
+
+    print(
+        "\nERROR: Failed to load dataset."
+    )
+
+    print(error)
+
+    df = pd.DataFrame()
+
+
+# ============================================================
+# HOME ROUTE
+# ============================================================
+
+@app.route("/", methods=["GET"])
+def home():
+
+    return render_template(
+        "base.html"
+    )
+
+
+# ============================================================
+# DEXTER COPILOT TEST PAGE
+# ============================================================
+
+@app.route("/dexter-test", methods=["GET"])
+def dexter_test():
+
+    return render_template(
+        "simple_test_page.html"
+    )
+
+
+# ============================================================
+# HEALTH CHECK
+# ============================================================
+
+@app.route("/api/health", methods=["GET"])
+def health():
+
+    return jsonify({
+        "status": "ok",
+        "dataset_loaded": not df.empty,
+        "rows": len(df),
+    })
+
+
+# ============================================================
+# EXCEL UPLOAD API
+# ============================================================
+
+@app.route("/api/upload", methods=["POST"])
+def upload_dataset():
+
+    global df
+
+    # --------------------------------------------------------
+    # CHECK FILE
+    # --------------------------------------------------------
+
+    if "file" not in request.files:
+
+        return jsonify({
+            "success": False,
+            "error": "No file was uploaded."
+        }), 400
+
+    uploaded_file = request.files["file"]
+
+    # --------------------------------------------------------
+    # CHECK FILENAME
+    # --------------------------------------------------------
+
+    if not uploaded_file.filename:
+
+        return jsonify({
+            "success": False,
+            "error": "No file was selected."
+        }), 400
+
+    # --------------------------------------------------------
+    # CHECK EXCEL EXTENSION
+    # --------------------------------------------------------
+
+    filename = uploaded_file.filename.lower()
+
+    if not (
+        filename.endswith(".xlsx")
+        or filename.endswith(".xls")
+    ):
+
+        return jsonify({
+            "success": False,
+            "error": (
+                "Invalid file type. "
+                "Please upload an Excel file."
+            )
+        }), 400
+
+    # --------------------------------------------------------
+    # READ EXCEL
+    # --------------------------------------------------------
+
+    try:
+
+        new_df = pd.read_excel(
+            uploaded_file
+        )
+
+        # Normalize column names
+        new_df.columns = (
+            new_df.columns
+            .astype(str)
+            .str.strip()
+        )
+
+        if (
+            "Total" not in new_df.columns
+            and "Total_NGBB" in new_df.columns
+        ):
+            new_df = new_df.rename(
+                columns={
+                    "Total_NGBB": "Total"
+                }
+            )
+
+        print("\nUPLOADED EXCEL COLUMNS:")
+        print(new_df.columns.tolist())
+
+    except Exception as error:
+
+        return jsonify({
+            "success": False,
+            "error": (
+                "Failed to read Excel file: "
+                f"{str(error)}"
+            )
+        }), 400
+
+    # --------------------------------------------------------
+    # CHECK DATA
+    # --------------------------------------------------------
+
+    if new_df.empty:
+
+        return jsonify({
+            "success": False,
+            "error": "The uploaded Excel file contains no data."
+        }), 400
+
+    # --------------------------------------------------------
+    # DETECT DATASET TYPE
+    # --------------------------------------------------------
+
+    if "Device_Name" in new_df.columns:
+
+        dataset_type = "SPD_Data_Device"
+
+    else:
+
+        dataset_type = "SPD_Data"
+
+    print(
+        f"\nDetected dataset type: {dataset_type}"
+    )
+
+    # --------------------------------------------------------
+    # REQUIRED COLUMNS
+    # --------------------------------------------------------
+
+    required_columns = [
+        "Total",
+        "Dealer_Code",
+        "Dealer_Name",
+        "Outlet_ID",
+        "Dealer_Region",
+        "Dealer_State",
+        "Year",
+        "Mth_Number",
+        "Month",
+        "Sales_Channel_New",
+        "Rateplan",
+        "Baseplan_Group",
+        "Customer_Sub_Type",
+    ]
+
+    # --------------------------------------------------------
+    # DEVICE DATASET REQUIRED COLUMNS
+    # --------------------------------------------------------
+
+    if dataset_type == "SPD_Data_Device":
+
+        required_columns.extend([
+            "Device_Name",
+            "Recontract_Flag",
+            "Contract_Type",
+        ])
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in new_df.columns
+    ]
+
+    if missing_columns:
+
+        return jsonify({
+            "success": False,
+            "error": "Uploaded Excel is missing required columns.",
+            "missing_columns": missing_columns,
+        }), 400
+
+    # --------------------------------------------------------
+    # REPLACE CURRENT DATASET
+    # --------------------------------------------------------
+
+    df = new_df
+
+    print("\n" + "=" * 60)
+    print("NEW DATASET UPLOADED")
+    print("=" * 60)
+
+    print(
+        f"File: {uploaded_file.filename}"
+    )
+
+    print(
+        f"Dataset Type: {dataset_type}"
+    )
+
+    print(
+        f"Rows: {len(df):,}"
+    )
+
+    print(
+        f"Columns: {len(df.columns):,}"
+    )
+
+    print("\nACTIVE DATASET COLUMNS:")
+    print(df.columns.tolist())
+
+    print("=" * 60)
+
+    # --------------------------------------------------------
+    # RETURN SUCCESS
+    # --------------------------------------------------------
+
+    return jsonify({
+        "success": True,
+        "filename": uploaded_file.filename,
+        "dataset_type": dataset_type,
+        "rows": len(df),
+        "columns": len(df.columns),
+        "message": "Dataset uploaded successfully.",
+    })
+
+
+# ============================================================
+# SALES TREND API
+# ============================================================
+
+@app.route("/api/dashboard/sales-trend", methods=["GET"])
+def sales_trend():
+
+    # --------------------------------------------------------
+    # CHECK DATASET
+    # --------------------------------------------------------
+
+    if df.empty:
+
+        return jsonify({
+            "success": False,
+            "error": "Dataset is not loaded."
+        }), 500
+
+    # --------------------------------------------------------
+    # REQUIRED COLUMNS
+    # --------------------------------------------------------
+
+    required_columns = [
+        "Total",
+        "Year",
+        "Mth_Number",
+        "Month",
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+
+        return jsonify({
+            "success": False,
+            "error": (
+                "Dataset is missing required columns "
+                "for Sales Trend."
+            ),
+            "missing_columns": missing_columns,
+        }), 400
+
+    # --------------------------------------------------------
+    # PROCESS SALES DATA
+    # --------------------------------------------------------
+
+    try:
+
+        sales_df = df[
+            [
+                "Total",
+                "Year",
+                "Mth_Number",
+                "Month",
+            ]
+        ].copy()
+
+        # ----------------------------------------------------
+        # NORMALIZE TOTAL
+        # ----------------------------------------------------
+
+        sales_df["Total"] = (
+            pd.to_numeric(
+                sales_df["Total"],
+                errors="coerce"
+            )
+            .fillna(0)
+        )
+
+        # ----------------------------------------------------
+        # NORMALIZE YEAR
+        # ----------------------------------------------------
+
+        sales_df["Year"] = (
+            pd.to_numeric(
+                sales_df["Year"],
+                errors="coerce"
+            )
+        )
+
+        # ----------------------------------------------------
+        # NORMALIZE MONTH NUMBER
+        # ----------------------------------------------------
+
+        sales_df["Mth_Number"] = (
+            pd.to_numeric(
+                sales_df["Mth_Number"],
+                errors="coerce"
+            )
+        )
+
+        # ----------------------------------------------------
+        # REMOVE INVALID DATE ROWS
+        # ----------------------------------------------------
+
+        sales_df = sales_df.dropna(
+            subset=[
+                "Year",
+                "Mth_Number"
+            ]
+        )
+
+        # ----------------------------------------------------
+        # GROUP SALES BY YEAR + MONTH
+        # ----------------------------------------------------
+
+        monthly_sales = (
+            sales_df
+            .groupby(
+                [
+                    "Year",
+                    "Mth_Number",
+                    "Month",
+                ],
+                as_index=False
+            )["Total"]
+            .sum()
+        )
+
+        # ----------------------------------------------------
+        # SORT CHRONOLOGICALLY
+        # ----------------------------------------------------
+
+        monthly_sales = (
+            monthly_sales
+            .sort_values(
+                [
+                    "Year",
+                    "Mth_Number",
+                ]
+            )
+            .reset_index(drop=True)
+        )
+
+        # ----------------------------------------------------
+        # CREATE DISPLAY LABEL
+        # ----------------------------------------------------
+
+        monthly_sales["Label"] = (
+            monthly_sales["Month"]
+            .astype(str)
+            .str.strip()
+            + " "
+            + monthly_sales["Year"]
+            .astype(int)
+            .astype(str)
+        )
+
+        # ----------------------------------------------------
+        # PREPARE RESPONSE
+        # ----------------------------------------------------
+
+        labels = (
+            monthly_sales["Label"]
+            .tolist()
+        )
+
+        values = (
+            monthly_sales["Total"]
+            .round(2)
+            .tolist()
+        )
+
+        # ----------------------------------------------------
+        # DETAILED DATA
+        # ----------------------------------------------------
+
+        data = []
+
+        for _, row in monthly_sales.iterrows():
+
+            data.append({
+                "year": int(
+                    row["Year"]
+                ),
+                "month_number": int(
+                    row["Mth_Number"]
+                ),
+                "month": str(
+                    row["Month"]
+                ),
+                "label": str(
+                    row["Label"]
+                ),
+                "total": round(
+                    float(row["Total"]),
+                    2
+                ),
+            })
+
+        # ----------------------------------------------------
+        # RETURN SALES TREND
+        # ----------------------------------------------------
+
+        return jsonify({
+            "success": True,
+            "labels": labels,
+            "values": values,
+            "data": data,
+        })
+
+    except Exception as error:
+
+        print("\n" + "=" * 60)
+        print("SALES TREND API ERROR")
+        print("=" * 60)
+
+        traceback.print_exc()
+
+        print("=" * 60 + "\n")
+
+        return jsonify({
+            "success": False,
+            "error": str(error),
+        }), 500
+
+
+# ============================================================
+# SPD DASHBOARD ANALYSIS API
+# ============================================================
+
+@app.route("/api/dashboard/spd-analysis", methods=["GET"])
+def spd_dashboard_analysis():
+
+    # --------------------------------------------------------
+    # CHECK DATASET
+    # --------------------------------------------------------
+
+    if df.empty:
+
+        return jsonify({
+            "success": False,
+            "error": "Dataset is not loaded."
+        }), 500
+
+    # --------------------------------------------------------
+    # REQUIRED SPD COLUMNS
+    # --------------------------------------------------------
+
+    required_columns = [
+        "Total",
+        "Dealer_Code",
+        "Dealer_Name",
+        "Outlet_ID",
+        "Dealer_Region",
+        "Dealer_State",
+        "Year",
+        "Mth_Number",
+        "Month",
+        "Customer_Sub_Type",
+        "Customer_Group",
+        "Sales_Channel_New",
+        "Baseplan_Group",
+        "Rateplan",
+        "Date",
+    ]
+
+    missing_columns = [
+        column
+        for column in required_columns
+        if column not in df.columns
+    ]
+
+    if missing_columns:
+
+        return jsonify({
+            "success": False,
+            "error": (
+                "Dataset is missing required SPD columns."
+            ),
+            "missing_columns": missing_columns,
+        }), 400
+
+    # --------------------------------------------------------
+    # RUN SPD ANALYSIS
+    # --------------------------------------------------------
+
+    try:
+
+        analysis = get_spd_complete_analysis(
+            df
+        )
+
+        # ----------------------------------------------------
+        # CONVERT DATAFRAMES TO JSON-SAFE DATA
+        # ----------------------------------------------------
+
+        response_data = {}
+
+        for key, value in analysis.items():
+
+            if isinstance(
+                value,
+                pd.DataFrame
+            ):
+
+                clean_value = (
+                    value
+                    .where(
+                        pd.notna(value),
+                        None
+                    )
+                )
+
+                response_data[key] = (
+                    clean_value
+                    .to_dict(
+                        orient="records"
+                    )
+                )
+
+            elif isinstance(
+                value,
+                dict
+            ):
+
+                clean_value = {}
+
+                for item_key, item_value in value.items():
+
+                    if pd.isna(item_value) if not isinstance(
+                        item_value,
+                        (list, dict)
+                    ) else False:
+
+                        clean_value[item_key] = None
+
+                    else:
+
+                        clean_value[item_key] = item_value
+
+                response_data[key] = clean_value
+
+            else:
+
+                response_data[key] = value
+
+        # ----------------------------------------------------
+        # RETURN SPD ANALYSIS
+        # ----------------------------------------------------
+
+        return jsonify({
+            "success": True,
+            "dataset_type": "SPD_Data",
+            "rows": len(df),
+            "analysis": response_data,
+        })
+
+    except Exception as error:
+
+        print("\n" + "=" * 60)
+        print("SPD DASHBOARD ANALYSIS API ERROR")
+        print("=" * 60)
+
+        traceback.print_exc()
+
+        print("=" * 60 + "\n")
+
+        return jsonify({
+            "success": False,
+            "error": str(error),
+        }), 500
+
+
+# ============================================================
+# DEALER CODE QUERY
+# ============================================================
+
+def is_dealer_code_question(question):
+
+    normalized_question = (
+        question
+        .lower()
+        .strip()
+    )
+
+    dealer_code_patterns = [
+        r"\bdealer\s*code\b",
+        r"\bdealercode\b",
+        r"\bdealer\s*id\b",
+        r"\bcode\s+for\s+(?:the\s+)?dealer\b",
+        r"\bcode\s+of\s+(?:the\s+)?dealer\b",
+    ]
+
+    return any(
+        re.search(
+            pattern,
+            normalized_question
+        )
+        for pattern in dealer_code_patterns
+    )
+
+
+def handle_dealer_code_query(question):
+
+    # --------------------------------------------------------
+    # CHECK REQUIRED COLUMNS
+    # --------------------------------------------------------
+
+    if "Dealer_Code" not in df.columns:
+
+        return {
+            "success": False,
+            "intent": "dealer_code",
+            "result": {},
+            "response": (
+                "The uploaded dataset does not contain "
+                "a Dealer_Code column."
+            )
+        }
+
+    if "Dealer_Name" not in df.columns:
+
+        return {
+            "success": False,
+            "intent": "dealer_code",
+            "result": {},
+            "response": (
+                "The uploaded dataset does not contain "
+                "a Dealer_Name column."
+            )
+        }
+
+    # --------------------------------------------------------
+    # NORMALIZE QUESTION
+    # --------------------------------------------------------
+
+    normalized_question = (
+        question
+        .lower()
+        .strip()
+    )
+
+    # --------------------------------------------------------
+    # TRY TO FIND DEALER NAME
+    # --------------------------------------------------------
+
+    dealer_name = None
+
+    patterns = [
+        r"\bdealer\s*code\s+(?:for|of)\s+(.+)$",
+        r"\bdealer\s*id\s+(?:for|of)\s+(.+)$",
+        r"\bcode\s+(?:for|of)\s+(?:the\s+)?dealer\s+(.+)$",
+        r"\bdealer\s+(.+?)['’]s\s+(?:dealer\s+)?code\b",
+        r"\bcode\s+for\s+(.+)$",
+    ]
+
+    for pattern in patterns:
+
+        match = re.search(
+            pattern,
+            normalized_question
+        )
+
+        if match:
+
+            dealer_name = (
+                match.group(1)
+                .strip()
+                .rstrip("?")
+                .strip()
+            )
+
+            break
+
+    # --------------------------------------------------------
+    # NO DEALER NAME PROVIDED
+    # --------------------------------------------------------
+
+    if not dealer_name:
+
+        unique_dealers = (
+            df[
+                [
+                    "Dealer_Name",
+                    "Dealer_Code"
+                ]
+            ]
+            .dropna()
+            .drop_duplicates()
+        )
+
+        return {
+            "success": True,
+            "intent": "dealer_code",
+            "result": {
+                "dealer_codes": unique_dealers[
+                    "Dealer_Code"
+                ]
+                .astype(str)
+                .unique()
+                .tolist()
+            },
+            "response": (
+                "There are multiple dealers in the dataset. "
+                "Please provide the dealer name so I can "
+                "give you the correct Dealer Code."
+            )
+        }
+
+    # --------------------------------------------------------
+    # SEARCH DEALER NAME
+    # --------------------------------------------------------
+
+    dealer_names = (
+        df["Dealer_Name"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+    search_name = dealer_name.lower()
+
+    exact_match = (
+        dealer_names.str.lower()
+        == search_name
+    )
+
+    matched_rows = df.loc[
+        exact_match,
+        [
+            "Dealer_Name",
+            "Dealer_Code"
+        ]
+    ].dropna()
+
+    # --------------------------------------------------------
+    # PARTIAL MATCH
+    # --------------------------------------------------------
+
+    if matched_rows.empty:
+
+        partial_match = (
+            dealer_names
+            .str.lower()
+            .str.contains(
+                search_name,
+                regex=False,
+                na=False
+            )
+        )
+
+        matched_rows = df.loc[
+            partial_match,
+            [
+                "Dealer_Name",
+                "Dealer_Code"
+            ]
+        ].dropna()
+
+    # --------------------------------------------------------
+    # DEALER NOT FOUND
+    # --------------------------------------------------------
+
+    if matched_rows.empty:
+
+        return {
+            "success": True,
+            "intent": "dealer_code",
+            "result": {
+                "dealer_name": dealer_name,
+                "dealer_code": None,
+            },
+            "response": (
+                f"I could not find a dealer named "
+                f"'{dealer_name}' in the dataset."
+            )
+        }
+
+    # --------------------------------------------------------
+    # UNIQUE DEALER / CODE PAIRS
+    # --------------------------------------------------------
+
+    matched_rows = (
+        matched_rows
+        .drop_duplicates()
+        .reset_index(drop=True)
+    )
+
+    # --------------------------------------------------------
+    # ONE MATCH
+    # --------------------------------------------------------
+
+    if len(matched_rows) == 1:
+
+        dealer = (
+            matched_rows.iloc[0]
+        )
+
+        dealer_name_result = (
+            str(
+                dealer["Dealer_Name"]
+            )
+        )
+
+        dealer_code_result = (
+            str(
+                dealer["Dealer_Code"]
+            )
+        )
+
+        return {
+            "success": True,
+            "intent": "dealer_code",
+            "result": {
+                "dealer_name":
+                    dealer_name_result,
+                "dealer_code":
+                    dealer_code_result,
+            },
+            "response": (
+                f"The Dealer Code for "
+                f"{dealer_name_result} is "
+                f"{dealer_code_result}."
+            )
+        }
+
+    # --------------------------------------------------------
+    # MULTIPLE MATCHES
+    # --------------------------------------------------------
+
+    dealers = []
+
+    for _, row in matched_rows.iterrows():
+
+        dealers.append({
+            "dealer_name":
+                str(row["Dealer_Name"]),
+            "dealer_code":
+                str(row["Dealer_Code"]),
+        })
+
+    return {
+        "success": True,
+        "intent": "dealer_code",
+        "result": {
+            "matches": dealers,
+        },
+        "response": (
+            f"I found multiple dealer matches for "
+            f"'{dealer_name}'. Please specify the "
+            f"exact dealer name."
+        )
+    }
+
+
+# ============================================================
+# QUERY API
+# ============================================================
+
+@app.route("/api/query", methods=["POST"])
+def query_api():
+
+    # --------------------------------------------------------
+    # CHECK DATASET
+    # --------------------------------------------------------
+
+    if df.empty:
+
+        return jsonify({
+            "success": False,
+            "error": "Dataset is not loaded."
+        }), 500
+
+    # --------------------------------------------------------
+    # GET REQUEST DATA
+    # --------------------------------------------------------
+
+    data = request.get_json(
+        silent=True
+    )
+
+    if not data:
+
+        return jsonify({
+            "success": False,
+            "error": "Request body must contain JSON."
+        }), 400
+
+    # --------------------------------------------------------
+    # GET QUESTION
+    # --------------------------------------------------------
+
+    question = data.get(
+        "question",
+        ""
+    )
+
+    if not isinstance(question, str):
+
+        return jsonify({
+            "success": False,
+            "error": "Question must be a string."
+        }), 400
+
+    question = question.strip()
+
+    if not question:
+
+        return jsonify({
+            "success": False,
+            "error": "Question cannot be empty."
+        }), 400
+
+    # --------------------------------------------------------
+    # DEALER CODE QUERY
+    # --------------------------------------------------------
+
+    if is_dealer_code_question(
+        question
+    ):
+
+        print("\n" + "=" * 60)
+        print("DEALER CODE QUERY")
+        print("=" * 60)
+
+        print(
+            f"Question: {question}"
+        )
+
+        dealer_code_result = (
+            handle_dealer_code_query(
+                question
+            )
+        )
+
+        print(
+            "Dealer Code Result:",
+            dealer_code_result
+        )
+
+        print("=" * 60 + "\n")
+
+        return jsonify(
+            dealer_code_result
+        )
+
+    # --------------------------------------------------------
+    # RUN QUERY ENGINE
+    # --------------------------------------------------------
+
+    try:
+
+        query_result = query(
+            question,
+            df
+        )
+
+        # ----------------------------------------------------
+        # GENERATE RESPONSE
+        # ----------------------------------------------------
+
+        response = generate_response(
+            query_result
+        )
+
+        # ----------------------------------------------------
+        # RETURN RESULT
+        # ----------------------------------------------------
+
+        return jsonify({
+            "success": True,
+            "question": question,
+            "intent": query_result.get(
+                "intent"
+            ),
+            "result": query_result.get(
+                "result",
+                {}
+            ),
+            "response": response,
+        })
+
+    except Exception as error:
+
+        print("\n" + "=" * 60)
+        print("QUERY API ERROR")
+        print("=" * 60)
+
+        traceback.print_exc()
+
+        print("=" * 60 + "\n")
+
+        return jsonify({
+            "success": False,
+            "error": str(error),
+        }), 500
+
+
+# ============================================================
+# DEXTER AI CHAT API
+# ============================================================
+
+@app.route("/api/ai/chat", methods=["POST"])
+def dexter_chat():
+
+    # --------------------------------------------------------
+    # CHECK DATASET
+    # --------------------------------------------------------
+
+    if df.empty:
+
+        return jsonify({
+            "success": False,
+            "error": "Dataset is not loaded."
+        }), 500
+
+    # --------------------------------------------------------
+    # GET REQUEST DATA
+    # --------------------------------------------------------
+
+    data = request.get_json(
+        silent=True
+    )
+
+    if not data:
+
+        return jsonify({
+            "success": False,
+            "error": "Request body must contain JSON."
+        }), 400
+
+    # --------------------------------------------------------
+    # GET QUESTION
+    # --------------------------------------------------------
+
+    question = data.get(
+        "question",
+        ""
+    )
+
+    if not isinstance(question, str):
+
+        return jsonify({
+            "success": False,
+            "error": "Question must be a string."
+        }), 400
+
+    question = question.strip()
+
+    if not question:
+
+        return jsonify({
+            "success": False,
+            "error": "Question cannot be empty."
+        }), 400
+
+    # --------------------------------------------------------
+    # GET CONVERSATION ID
+    # --------------------------------------------------------
+
+    conversation_id = data.get(
+        "conversation_id"
+    )
+
+    if conversation_id is not None:
+
+        if not isinstance(
+            conversation_id,
+            str
+        ):
+
+            return jsonify({
+                "success": False,
+                "error": (
+                    "conversation_id must be a string "
+                    "or null."
+                )
+            }), 400
+
+        conversation_id = (
+            conversation_id.strip()
+        )
+
+        if not conversation_id:
+            conversation_id = None
+
+    # --------------------------------------------------------
+    # LOG REQUEST
+    # --------------------------------------------------------
+
+    print("\n" + "=" * 60)
+    print("DEXTER AI CHAT")
+    print("=" * 60)
+
+    print(
+        f"Question: {question}"
+    )
+
+    print(
+        f"Conversation ID: {conversation_id}"
+    )
+
+    # --------------------------------------------------------
+    # RUN VERIFIED PYTHON ANALYSIS
+    # --------------------------------------------------------
+
+    try:
+
+        if is_dealer_code_question(
+            question
+        ):
+
+            print(
+                "Analysis type: Dealer Code"
+            )
+
+            dealer_code_result = (
+                handle_dealer_code_query(
+                    question
+                )
+            )
+
+            query_result = {
+                "success":
+                    dealer_code_result.get(
+                        "success",
+                        False
+                    ),
+                "intent":
+                    dealer_code_result.get(
+                        "intent",
+                        "dealer_code"
+                    ),
+                "result":
+                    dealer_code_result.get(
+                        "result",
+                        {}
+                    ),
+            }
+
+        else:
+
+            print(
+                "Analysis type: Query Engine"
+            )
+
+            query_result = query(
+                question,
+                df
+            )
+
+        print(
+            "\nVERIFIED PYTHON RESULT:"
+        )
+
+        print(
+            query_result
+        )
+
+    except Exception as error:
+
+        print("\n" + "=" * 60)
+        print("DEXTER PYTHON ANALYSIS ERROR")
+        print("=" * 60)
+
+        traceback.print_exc()
+
+        print("=" * 60 + "\n")
+
+        return jsonify({
+            "success": False,
+            "error": (
+                "Python analytics could not process "
+                f"the question: {str(error)}"
+            ),
+        }), 500
+
+    # --------------------------------------------------------
+    # SEND VERIFIED RESULT TO DEXTER
+    # --------------------------------------------------------
+
+    try:
+
+        print(
+            "\nSending verified result to Dexter..."
+        )
+
+        dexter_result = ask_dexter(
+            question=question,
+            query_result=query_result,
+            dataset_name="Sales_Inventory",
+            conversation_id=conversation_id,
+        )
+
+        print(
+            "Dexter response received."
+        )
+
+        print("=" * 60 + "\n")
+
+        # ----------------------------------------------------
+        # RETURN DEXTER RESPONSE
+        # ----------------------------------------------------
+
+        return jsonify({
+            "success": True,
+            "question": question,
+            "answer": dexter_result.get(
+                "answer",
+                ""
+            ),
+            "conversation_id":
+                dexter_result.get(
+                    "conversation_id"
+                ),
+            "intent":
+                query_result.get(
+                    "intent"
+                ),
+        })
+
+    except DexterServiceError as error:
+
+        print("\n" + "=" * 60)
+        print("DEXTER SERVICE ERROR")
+        print("=" * 60)
+
+        print(
+            str(error)
+        )
+
+        print("=" * 60 + "\n")
+
+        return jsonify({
+            "success": False,
+            "error": str(error),
+        }), 502
+
+    except Exception as error:
+
+        print("\n" + "=" * 60)
+        print("DEXTER AI ERROR")
+        print("=" * 60)
+
+        traceback.print_exc()
+
+        print("=" * 60 + "\n")
+
+        return jsonify({
+            "success": False,
+            "error": (
+                "Dexter could not process the request: "
+                f"{str(error)}"
+            ),
+        }), 502
+
+
+# ============================================================
+# DEBUG — PRINT ALL REGISTERED ROUTES
+# ============================================================
+
+print("\n" + "=" * 60)
+print("REGISTERED FLASK ROUTES")
+print("=" * 60)
+
+for rule in app.url_map.iter_rules():
+
+    print(
+        f"{rule.methods} -> {rule}"
+    )
+
+print("=" * 60 + "\n")
+
+
+# ============================================================
+# RUN APPLICATION
+# ============================================================
+
+if __name__ == "__main__":
+
+    app.run(
+        host="127.0.0.1",
+        port=5000,
+        debug=True,
+    )
