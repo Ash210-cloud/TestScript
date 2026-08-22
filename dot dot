@@ -1,1 +1,625 @@
+import re
+import pandas as pd
 
+from data_engine.insight_engine import (
+    get_overall_insight,
+    get_top_device_insight,
+    get_top_devices_insight,
+    get_top_dealer_insight,
+    get_top_dealers_insight,
+    get_low_performing_dealers_insight,
+    get_top_region_insight,
+    get_top_state_insight,
+    get_top_states_insight,
+    get_best_month_insight,
+    get_worst_month_insight,
+    get_latest_month_change_insight,
+    get_biggest_monthly_decline_insight,
+    get_recontract_insight,
+    get_top_channel_insight,
+    get_top_rateplan_insight,
+    get_top_baseplan_insight,
+    get_top_customer_subtype_insight,
+)
+
+
+# ============================================================
+# INTENT DETECTION
+# ============================================================
+
+def detect_intent(question: str) -> str:
+    """
+    Detect the business intent of a user's question.
+
+    The query engine does not calculate anything itself.
+    It identifies what the user wants and routes the
+    question to the appropriate Insight Engine function.
+    """
+
+    q = question.lower().strip()
+
+    # --------------------------------------------------------
+    # OVERALL SUMMARY
+    # --------------------------------------------------------
+
+    if any(keyword in q for keyword in [
+        "overall sales",
+        "sales summary",
+        "overall performance",
+        "business summary",
+        "sales overview",
+        "overall",
+        "summary",
+    ]):
+        return "overall_summary"
+
+    # --------------------------------------------------------
+    # DEALER CODE
+    # --------------------------------------------------------
+
+    if (
+        "dealer code" in q
+        or "dealer_code" in q
+        or "dealercode" in q
+    ):
+        return "dealer_code"
+
+    # --------------------------------------------------------
+    # TOP DEVICES
+    # --------------------------------------------------------
+
+    if (
+        "device" in q
+        and any(keyword in q for keyword in [
+            "top",
+            "best",
+            "highest",
+            "most sold",
+            "best selling",
+            "best-selling",
+        ])
+    ):
+        number = extract_number(q)
+
+        if number:
+            return f"top_devices:{number}"
+
+        return "top_device"
+
+    # --------------------------------------------------------
+    # LOW-PERFORMING DEALERS
+    # --------------------------------------------------------
+
+    if (
+        "dealer" in q
+        and any(keyword in q for keyword in [
+            "bottom",
+            "low-performing",
+            "low performing",
+            "poor-performing",
+            "poor performing",
+            "less perform",
+            "least perform",
+            "lowest",
+            "worst",
+        ])
+    ):
+        return "low_performing_dealers"
+
+    # --------------------------------------------------------
+    # TOP DEALERS
+    # --------------------------------------------------------
+
+    if (
+        "dealer" in q
+        and any(keyword in q for keyword in [
+            "top",
+            "best",
+            "highest",
+            "most",
+            "perform",
+        ])
+    ):
+        number = extract_number(q)
+
+        if number:
+            return f"top_dealers:{number}"
+
+        return "top_dealer"
+
+    # --------------------------------------------------------
+    # TOP REGION
+    # --------------------------------------------------------
+
+    if (
+        "region" in q
+        and any(keyword in q for keyword in [
+            "top",
+            "best",
+            "highest",
+            "most",
+            "perform",
+        ])
+    ):
+        return "top_region"
+
+    # --------------------------------------------------------
+    # TOP STATE
+    # --------------------------------------------------------
+
+    if (
+        "state" in q
+        and any(keyword in q for keyword in [
+            "top",
+            "best",
+            "highest",
+            "most",
+            "perform",
+        ])
+    ):
+        number = extract_number(q)
+
+        if number:
+            return f"top_states:{number}"
+
+        return "top_state"
+
+    # --------------------------------------------------------
+    # BIGGEST MONTHLY DECLINE
+    # --------------------------------------------------------
+
+    if any(keyword in q for keyword in [
+        "biggest monthly decline",
+        "largest monthly decline",
+        "biggest monthly drop",
+        "largest monthly drop",
+        "biggest monthly decrease",
+        "largest monthly decrease",
+        "worst monthly decline",
+        "biggest decline",
+        "largest decline",
+        "biggest drop",
+        "largest drop",
+    ]):
+        return "biggest_monthly_decline"
+
+    # --------------------------------------------------------
+    # BEST MONTH
+    # --------------------------------------------------------
+
+    if (
+        "month" in q
+        and any(keyword in q for keyword in [
+            "best",
+            "highest",
+            "top",
+        ])
+        and not any(keyword in q for keyword in [
+            "decline",
+            "drop",
+            "decrease",
+            "change",
+        ])
+    ):
+        return "best_month"
+
+    # --------------------------------------------------------
+    # WORST MONTH
+    # --------------------------------------------------------
+
+    if (
+        "month" in q
+        and any(keyword in q for keyword in [
+            "worst",
+            "lowest",
+        ])
+        and not any(keyword in q for keyword in [
+            "decline",
+            "drop",
+            "decrease",
+            "change",
+        ])
+    ):
+        return "worst_month"
+
+    # --------------------------------------------------------
+    # LATEST MONTH CHANGE
+    # --------------------------------------------------------
+
+    if any(keyword in q for keyword in [
+        "latest month",
+        "latest month's",
+        "latest month sales",
+        "current month",
+        "current month's",
+        "most recent month",
+        "recent month",
+    ]) and any(keyword in q for keyword in [
+        "change",
+        "performance",
+        "sales",
+        "increase",
+        "decrease",
+        "growth",
+        "decline",
+    ]):
+        return "latest_month_change"
+
+    # --------------------------------------------------------
+    # RECONTRACT
+    # --------------------------------------------------------
+
+    if any(keyword in q for keyword in [
+        "recontract",
+        "recontract sales",
+        "recontract percentage",
+        "recontract percentage of sales",
+        "new device",
+        "new device ga",
+    ]):
+        return "recontract_analysis"
+
+    # --------------------------------------------------------
+    # SALES CHANNEL
+    # --------------------------------------------------------
+
+    if (
+        ("sales channel" in q or "channel" in q)
+        and any(keyword in q for keyword in [
+            "top",
+            "best",
+            "highest",
+            "perform",
+        ])
+    ):
+        return "top_sales_channel"
+
+    # --------------------------------------------------------
+    # RATEPLAN
+    # --------------------------------------------------------
+
+    if any(keyword in q for keyword in [
+        "rateplan",
+        "rate plan",
+        "best rateplan",
+        "top rateplan",
+        "highest rateplan",
+        "rateplan with the highest sales",
+    ]):
+        return "top_rateplan"
+
+    # --------------------------------------------------------
+    # BASEPLAN
+    # --------------------------------------------------------
+
+    if any(keyword in q for keyword in [
+        "baseplan",
+        "base plan",
+        "best baseplan",
+        "top baseplan",
+        "highest baseplan",
+        "baseplan with the highest sales",
+    ]):
+        return "top_baseplan"
+
+    # --------------------------------------------------------
+    # CUSTOMER SUBTYPE
+    # --------------------------------------------------------
+
+    if any(keyword in q for keyword in [
+        "customer subtype",
+        "customer sub type",
+        "customer type",
+        "best customer type",
+        "top customer type",
+        "customer segment",
+        "customer group",
+    ]):
+        return "top_customer_subtype"
+
+    # --------------------------------------------------------
+    # UNKNOWN
+    # --------------------------------------------------------
+
+    return "unknown"
+
+
+# ============================================================
+# NUMBER EXTRACTION
+# ============================================================
+
+def extract_number(question: str):
+    """
+    Extract a requested ranking number.
+
+    Examples:
+
+        "top 5 devices"  -> 5
+        "top 10 dealers" -> 10
+        "show me 3 best devices" -> 3
+    """
+
+    match = re.search(
+        r"\b(?:top|best)\s+(\d+)\b",
+        question.lower()
+    )
+
+    if match:
+        return int(match.group(1))
+
+    return None
+
+
+# ============================================================
+# QUERY EXECUTION
+# ============================================================
+
+def execute_query(
+    intent: str,
+    df: pd.DataFrame,
+) -> dict:
+    """
+    Execute a detected intent against the dataset.
+    """
+
+    # --------------------------------------------------------
+    # OVERALL SUMMARY
+    # --------------------------------------------------------
+
+    if intent == "overall_summary":
+
+        return get_overall_insight(df)
+
+    # --------------------------------------------------------
+    # DEALER CODE
+    # --------------------------------------------------------
+
+    if intent == "dealer_code":
+
+        if "Dealer_Code" not in df.columns:
+
+            return {
+                "insight_type": "dealer_code",
+                "found": False,
+                "message": (
+                    "The Dealer_Code column was not found "
+                    "in the dataset."
+                ),
+            }
+
+        dealer_codes = (
+            df["Dealer_Code"]
+            .dropna()
+            .astype(str)
+            .str.strip()
+        )
+
+        dealer_codes = [
+            code
+            for code in dealer_codes
+            if code
+        ]
+
+        dealer_codes = list(
+            dict.fromkeys(
+                dealer_codes
+            )
+        )
+
+        return {
+            "insight_type": "dealer_code",
+            "found": len(dealer_codes) > 0,
+            "dealer_codes": dealer_codes,
+            "count": len(dealer_codes),
+            "message": (
+                "Dealer codes retrieved successfully."
+                if dealer_codes
+                else "No dealer codes were found in the dataset."
+            ),
+        }
+
+    # --------------------------------------------------------
+    # TOP DEVICE
+    # --------------------------------------------------------
+
+    if intent == "top_device":
+
+        return get_top_device_insight(df)
+
+    # --------------------------------------------------------
+    # TOP DEVICES
+    # --------------------------------------------------------
+
+    if intent.startswith("top_devices:"):
+
+        limit = int(
+            intent.split(":")[1]
+        )
+
+        return get_top_devices_insight(
+            df,
+            limit
+        )
+
+    # --------------------------------------------------------
+    # TOP DEALER
+    # --------------------------------------------------------
+
+    if intent == "top_dealer":
+
+        return get_top_dealer_insight(df)
+
+    # --------------------------------------------------------
+    # TOP DEALERS
+    # --------------------------------------------------------
+
+    if intent.startswith("top_dealers:"):
+
+        limit = int(
+            intent.split(":")[1]
+        )
+
+        return get_top_dealers_insight(
+            df,
+            limit
+        )
+
+    # --------------------------------------------------------
+    # LOW-PERFORMING DEALERS
+    # --------------------------------------------------------
+
+    if intent == "low_performing_dealers":
+
+        return get_low_performing_dealers_insight(df)
+
+    # --------------------------------------------------------
+    # TOP REGION
+    # --------------------------------------------------------
+
+    if intent == "top_region":
+
+        return get_top_region_insight(df)
+
+    # --------------------------------------------------------
+    # TOP STATE
+    # --------------------------------------------------------
+
+    if intent == "top_state":
+
+        return get_top_state_insight(df)
+
+    # --------------------------------------------------------
+    # TOP STATES
+    # --------------------------------------------------------
+
+    if intent.startswith("top_states:"):
+
+        limit = int(
+            intent.split(":")[1]
+        )
+
+        return get_top_states_insight(
+            df,
+            limit
+        )
+
+    # --------------------------------------------------------
+    # BEST MONTH
+    # --------------------------------------------------------
+
+    if intent == "best_month":
+
+        return get_best_month_insight(df)
+
+    # --------------------------------------------------------
+    # WORST MONTH
+    # --------------------------------------------------------
+
+    if intent == "worst_month":
+
+        return get_worst_month_insight(df)
+
+    # --------------------------------------------------------
+    # LATEST MONTH CHANGE
+    # --------------------------------------------------------
+
+    if intent == "latest_month_change":
+
+        return get_latest_month_change_insight(df)
+
+    # --------------------------------------------------------
+    # BIGGEST MONTHLY DECLINE
+    # --------------------------------------------------------
+
+    if intent == "biggest_monthly_decline":
+
+        return get_biggest_monthly_decline_insight(df)
+
+    # --------------------------------------------------------
+    # RECONTRACT
+    # --------------------------------------------------------
+
+    if intent == "recontract_analysis":
+
+        return get_recontract_insight(df)
+
+    # --------------------------------------------------------
+    # SALES CHANNEL
+    # --------------------------------------------------------
+
+    if intent == "top_sales_channel":
+
+        return get_top_channel_insight(df)
+
+    # --------------------------------------------------------
+    # RATEPLAN
+    # --------------------------------------------------------
+
+    if intent == "top_rateplan":
+
+        return get_top_rateplan_insight(df)
+
+    # --------------------------------------------------------
+    # BASEPLAN
+    # --------------------------------------------------------
+
+    if intent == "top_baseplan":
+
+        return get_top_baseplan_insight(df)
+
+    # --------------------------------------------------------
+    # CUSTOMER SUBTYPE
+    # --------------------------------------------------------
+
+    if intent == "top_customer_subtype":
+
+        return get_top_customer_subtype_insight(df)
+
+    # --------------------------------------------------------
+    # UNKNOWN
+    # --------------------------------------------------------
+
+    return {
+        "insight_type": "unknown",
+        "found": False,
+        "message": (
+            "I could not determine what sales or "
+            "inventory information the user is asking for."
+        ),
+    }
+
+
+# ============================================================
+# MAIN QUERY FUNCTION
+# ============================================================
+
+def query(
+    question: str,
+    df: pd.DataFrame,
+) -> dict:
+    """
+    Main entry point for the Query Engine.
+
+    Example:
+
+        result = query(
+            "Who is the best dealer?",
+            df
+        )
+
+    Returns a structured dictionary that can later
+    be passed to Copilot or another AI layer.
+    """
+
+    intent = detect_intent(question)
+
+    result = execute_query(
+        intent,
+        df
+    )
+
+    return {
+        "question": question,
+        "intent": intent,
+        "result": result,
+    }
